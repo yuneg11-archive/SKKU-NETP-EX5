@@ -9,7 +9,7 @@
 
 using namespace ns3;
 
-NS_LOG_COMPONENT_DEFINE("week7_exer");
+NS_LOG_COMPONENT_DEFINE("Exercise7");
 
 // Function outputs the maximum value of an input vector a
 double maximum(double *arr) {
@@ -26,8 +26,8 @@ double maximum(double *arr) {
 double minimum(double *arr) {
     double min = arr[0];
     for (int i = 0; i < 100; i++) {
-        if (min > a[i]) {
-            min = a[i];
+        if (min > arr[i]) {
+            min = arr[i];
         }
     }
     return min;
@@ -35,64 +35,43 @@ double minimum(double *arr) {
 
 // Fuction that outputs the index of the minimum value of an input vector a
 int minp(double *arr) {
-    double min = a[0];
+    double min = arr[0];
     int minIndex = 0;
     for (int i = 0; i < 100; i++) {
-        if (min > a[i]) {
-            min = a[i];
+        if (min > arr[i]) {
+            min = arr[i];
             minIndex = i;
         }
     }
     return minIndex;
 }
 
-double timeInterval1;
-double timeInterval2;
-
-int count1 = 0;
-int count2 = 0;
-
-double time1[100];
-double time2[100];
-
-uint32_t pkt_size1[100];
-uint32_t pkt_size2[100];
+int countGlobal[2] = { 0 };
+double timePointGlobal[2][100] = { 0 };
+uint32_t totalPacketSizeGlobal[2] = { 0 };
 
 // Trace sink that prints moving average throughput of Flow 1
-static void UdpThroughput1(Ptr<const Packet> p, const Address &ad) {
-    pkt_size1[count1] = p->GetSize();
+static void UdpThroughput(std::string flowIndexString, Ptr<const Packet> packetP, const Address &address) {
+    int flowIndex = std::stoi(flowIndexString);
 
-    if (count1 < 100) {
-        time1[count1] = Simulator::Now().GetSeconds();
-        count1++;
-    }
-    if (count1 >= 100) {
-        timeInterval1 = maximum(time1) - minimum(time1);
-        time1[minp(time1)] = Simulator::Now().GetSeconds();
-    }
-    uint32_t total_pkt_size = 0;
-    for(int i = 0; i < 100; i++) {
-        total_pkt_size += pkt_size1[i];
+    int &count = countGlobal[flowIndex];
+    double *timePoint = timePointGlobal[flowIndex];
+    uint32_t &totalPacketSize = totalPacketSizeGlobal[flowIndex];
+
+    if (count < 100) {
+        timePoint[count] = Simulator::Now().GetSeconds();
+        totalPacketSize += packetP->GetSize();
+        count++;
     }
 
-    double throughput = (double)total_pkt_size / timeInterval1;
+    if (count >= 100) {
+        double timeInterval = maximum(timePoint) - minimum(timePoint);
+        double throughput = (double)totalPacketSize / timeInterval;
 
-    NS_LOG_UNCOND("1\t" << Simulator::Now().GetSeconds() << "\t" << throughput);
-}
+        timePoint[minp(timePoint)] = Simulator::Now().GetSeconds();
 
-static void UdpThroughput2(Ptr<const Packet> p, const Address &ad) {
-    //===========================================================================================
-    /* ToDo: Create a trace sink that prints moving average throughput with window size 100
-             When the number of received packets is equal to or larger than 100, it can be calculated correctly
-             When 100th packet is received, then throughput of the time t = NOW is
-             (total size of 1~100 packet) / [(time when 100th packet arrived or NOW) - (time when 1st packet arrived)]
-             When 101th packet is received, then throughput of the time t = NOW is
-             (total size of 2~101 packet) / [(time when 101th packet arrived or NOW) - (time when 2nd packet arrived)]
-             ...
-             You can get the packet size by p->GetSize() (in bytes) whose return type is uint32_t
-       Hint: Refer to the above trace sink for Flow 1 */
-
-    //==========================================================================================
+        NS_LOG_UNCOND((flowIndex + 1) << "\t" << Simulator::Now().GetSeconds() << "\t" << throughput);
+    }
 }
 
 int main(int argc, char *argv[]) {
@@ -132,52 +111,42 @@ int main(int argc, char *argv[]) {
 
     Ipv4AddressHelper address;
     address.SetBase("10.1.1.0", "255.255.255.0");
-    Ipv4InterfaceContainer Interfaces;
-    Interfaces = address.Assign(terminalDevices);
+    address.Assign(terminalDevices);
 
     Ipv4GlobalRoutingHelper::PopulateRoutingTables();
 
-    // Implement Onoff application (Flow 1)
-    OnOffHelper onoff("ns3::UdpSocketFactory", Address(InetSocketAddress(Ipv4Address("10.1.1.2"), port)));
-
-    //=========================================================================================
-    /* ToDo: Configure OnOff Application configuration for Flow1,  i.e., Datarate= 5 Mbps and always on  */
-    onoff.(...);
-    onoff.(...);
-    onoff.(...);
-
-    ApplicationContainer app1 (...);
-    app1.(...);
-    app1.(...);
-    //==========================================================================================
-
     // Implement packet sink application for Flow 1
     PacketSinkHelper sink("ns3::UdpSocketFactory", Address(InetSocketAddress(Ipv4Address::GetAny(), port)));
-    ApplicationContainer sinkApp1 = sink.Install(terminals.Get(1));
-    sinkApp1.Start(Seconds(0.0));
 
-    //=========================================================================================
-    /* ToDo: Conncet trace source "Rx" to the trace sink for Flow 1 */
-    sinkApp1.Get(0)-> (...);
-    //=========================================================================================
+    // Implement Onoff application (Flow 1)
+    OnOffHelper onoff1("ns3::UdpSocketFactory", Address(InetSocketAddress(Ipv4Address("10.1.1.2"), port)));
+    onoff1.SetAttribute("OnTime", StringValue("ns3::ConstantRandomVariable[Constant=1]"));
+    onoff1.SetAttribute("OffTime", StringValue("ns3::ConstantRandomVariable[Constant=0]"));
+    onoff1.SetAttribute("DataRate", StringValue("5Mbps"));
+
+    ApplicationContainer app1 = onoff1.Install(terminals.Get(0));
+    app1.Start(Seconds(1));
+    app1.Stop(Seconds(10));
+
+    ApplicationContainer sinkApp1 = sink.Install(terminals.Get(1));
+    sinkApp1.Start(Seconds(0));
+    sinkApp1.Get(0)->TraceConnect("Rx", "0", MakeCallback(&UdpThroughput));
 
     // Create a similar flow (Flow 2)
-    onoff.SetAttribute("Remote", AddressValue(InetSocketAddress(Ipv4Address("10.1.1.1"), port)));
-    onoff.SetAttribute("DataRate", StringValue("10Mb/s"));
+    OnOffHelper onoff("ns3::UdpSocketFactory", Address(InetSocketAddress(Ipv4Address("10.1.1.1"), port)));
+    onoff.SetAttribute("OnTime", StringValue("ns3::ConstantRandomVariable[Constant=1]"));
+    onoff.SetAttribute("OffTime", StringValue("ns3::ConstantRandomVariable[Constant=0]"));
+    onoff.SetAttribute("DataRate", StringValue("10Mbps"));
+
     ApplicationContainer app2 = onoff.Install(terminals.Get(3));
-    app2.Start(Seconds(3.0));
-    app2.Stop(Seconds(13.0));
+    app2.Start(Seconds(3));
+    app2.Stop(Seconds(13));
 
-    // Implement packet sink application for Flow 2
     ApplicationContainer sinkApp2 = sink.Install(terminals.Get(0));
-    sinkApp2.Start(Seconds(0.0));
+    sinkApp2.Start(Seconds(0));
+    sinkApp2.Get(0)->TraceConnect("Rx", "1", MakeCallback(&UdpThroughput));
 
-    //=========================================================================================
-    /* ToDo: Conncet trace source "Rx" to the trace sink for Flow 2 */
-    sinkApp2.Get(0)-> (...);
-    //=========================================================================================
-
-
+    // Run simulator
     Simulator::Run();
     Simulator::Destroy();
 
